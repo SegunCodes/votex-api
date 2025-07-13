@@ -1,5 +1,5 @@
-import { v2 as cloudinary } from "cloudinary";
-import dotenv from "dotenv";
+import { v2 as cloudinary } from 'cloudinary';
+import dotenv from 'dotenv';
 
 dotenv.config();
 
@@ -7,18 +7,14 @@ cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
-  secure: true,
+  secure: true, // Use HTTPS
 });
 
-if (
-  !process.env.CLOUDINARY_CLOUD_NAME ||
-  !process.env.CLOUDINARY_API_KEY ||
-  !process.env.CLOUDINARY_API_SECRET
-) {
-  console.error(
-    "Cloudinary credentials are not fully defined in environment variables. Image uploads will fail."
-  );
-  process.exit(1);
+// Basic validation for Cloudinary config
+if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+  console.warn('Cloudinary credentials are not fully defined in environment variables. Image uploads will fail.');
+  // In a production app, you might want to throw an error and stop the server.
+  // process.exit(1);
 }
 
 /**
@@ -27,22 +23,17 @@ if (
  * @param {string} [folder='votex_images'] - The folder name in Cloudinary to upload to.
  * @returns {Promise<cloudinary.UploadApiResponse>} The Cloudinary upload response.
  */
-export const uploadImage = async (
-  imagePath: string,
-  folder: string = "votex_images"
-): Promise<cloudinary.UploadApiResponse> => {
+export const uploadImage = async (imagePath: string, folder: string = 'votex_images'): Promise<any> => { 
   try {
     const result = await cloudinary.uploader.upload(imagePath, {
       folder: folder,
-      resource_type: "image", // Ensure it's treated as an image
+      resource_type: 'image', // Ensure it's treated as an image
     });
-    console.log("Image uploaded to Cloudinary:", result.secure_url);
+    console.log('Image uploaded to Cloudinary:', result.secure_url);
     return result;
   } catch (error) {
-    console.error("Cloudinary upload error:", (error as Error).message);
-    throw new Error(
-      `Failed to upload image to Cloudinary: ${(error as Error).message}`
-    );
+    console.error('Cloudinary upload error:', (error as Error).message);
+    throw new Error(`Failed to upload image to Cloudinary: ${(error as Error).message}`);
   }
 };
 
@@ -51,17 +42,13 @@ export const uploadImage = async (
  * @param {string} publicId - The public ID of the image to delete.
  * @returns {Promise<cloudinary.DeleteApiResponse>} The Cloudinary deletion response.
  */
-export const deleteImage = async (
-  publicId: string
-): Promise<cloudinary.DeleteApiResponse> => {
+export const deleteImage = async (publicId: string): Promise<any> => {
   try {
     const result = await cloudinary.uploader.destroy(publicId);
-    console.log("Image deleted from Cloudinary:", publicId, result);
+    console.log('Image deleted from Cloudinary:', publicId, result);
     return result;
   } catch (error) {
-    console.error("Cloudinary deletion error:", (error as Error).message);
-    throw new Error(
-      `Failed to delete image from Cloudinary: ${(error as Error).message}`
-    );
+    console.error('Cloudinary deletion error:', (error as Error).message);
+    throw new Error(`Failed to delete image from Cloudinary: ${(error as Error).message}`);
   }
 };

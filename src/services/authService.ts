@@ -1,13 +1,12 @@
 import jwt from "jsonwebtoken";
+import type { SignOptions } from "jsonwebtoken";
 import { ethers } from "ethers";
 import { DecodedToken } from "../types/index.d";
 
-const jwtSecret = process.env.JWT_SECRET;
+const jwtSecret: string = process.env.JWT_SECRET || "my-fallback-secret";
 
-if (!jwtSecret) {
-  console.error(
-    "JWT_SECRET is not defined in environment variables. JWT operations will fail."
-  );
+if (!process.env.JWT_SECRET) {
+  console.error('JWT_SECRET is not defined in environment variables. JWT operations will fail.');
   process.exit(1);
 }
 
@@ -17,11 +16,9 @@ if (!jwtSecret) {
  * @param {string} expiresIn - Token expiration time (e.g., '1h', '7d').
  * @returns {string} The signed JWT token.
  */
-export const generateToken = (
-  payload: object,
-  expiresIn: string = "1h"
-): string => {
-  return jwt.sign(payload, jwtSecret, { expiresIn });
+export const generateToken = (payload: object, expiresIn: string = '1h'): string => {
+  const options: SignOptions = { expiresIn: expiresIn as any };
+  return jwt.sign(payload, jwtSecret as string, options);
 };
 
 /**
@@ -31,9 +28,9 @@ export const generateToken = (
  */
 export const verifyToken = (token: string): DecodedToken | null => {
   try {
-    return jwt.verify(token, jwtSecret) as DecodedToken;
+    return jwt.verify(token, jwtSecret as string) as DecodedToken;
   } catch (error) {
-    console.error("JWT verification failed:", (error as Error).message);
+    console.error('JWT verification failed:', (error as Error).message);
     return null;
   }
 };

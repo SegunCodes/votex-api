@@ -45,6 +45,7 @@ router.put(
 router.post("/elections/:electionId/start", adminController.startElection);
 router.post("/elections/:electionId/end", adminController.endElection);
 router.get("/elections/:electionId/audit", adminController.auditElection);
+router.post('/elections/:electionId/whitelist-voter', adminController.whitelistVoter);
 
 // Post Management within an Election
 router.post("/elections/:electionId/posts", adminController.createPost);

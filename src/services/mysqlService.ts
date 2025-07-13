@@ -85,17 +85,18 @@ export const createVoter = async (
     | "updated_at"
     | "registration_status"
     | "is_eligible_on_chain"
+    | "auth_nonce"
+    | "wallet_address"
   >
 ): Promise<number> => {
   const [result] = await pool.execute<ResultSetHeader>(
-    "INSERT INTO voters (email, name, age, gender, national_id_number, wallet_address, registration_status) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO voters (email, name, age, gender, national_id_number, registration_status) VALUES (?, ?, ?, ?, ?, ?)",
     [
       voter.email,
       voter.name,
       voter.age,
       voter.gender,
       voter.national_id_number || null,
-      voter.wallet_address || null,
       "pending_email_verification",
     ]
   );
@@ -120,14 +121,25 @@ export const getVoterByWalletAddress = async (
   return (rows as Voter[])[0] || null;
 };
 
+export const getAllVoters = async (): Promise<Voter[]> => {
+  // ADDED THIS FUNCTION
+  const [rows] = await pool.execute<RowDataPacket[]>("SELECT * FROM voters");
+  return rows as Voter[];
+};
+
 export const updateVoter = async (
   id: number,
   updates: Partial<Voter>
 ): Promise<boolean> => {
   const fields = Object.keys(updates)
+    .filter(
+      (key) => key !== "id" && key !== "created_at" && key !== "updated_at"
+    )
     .map((key) => `${key} = ?`)
     .join(", ");
   const values = Object.values(updates);
+  if (fields.length === 0) return false; // No fields to update
+
   const [result] = await pool.execute<ResultSetHeader>(
     `UPDATE voters SET ${fields}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
     [...values, id]
@@ -150,8 +162,9 @@ export const updateVoterStatusAndWallet = async (
 
 export const updateVoterAuthNonce = async (
   voterId: number,
-  nonce: string
+  nonce: string | null
 ): Promise<boolean> => {
+  // ALLOW NULL FOR NONCE
   const [result] = await pool.execute<ResultSetHeader>(
     "UPDATE voters SET auth_nonce = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
     [nonce, voterId]
@@ -210,9 +223,14 @@ export const updateElection = async (
   updates: Partial<Election>
 ): Promise<boolean> => {
   const fields = Object.keys(updates)
+    .filter(
+      (key) => key !== "id" && key !== "created_at" && key !== "updated_at"
+    )
     .map((key) => `${key} = ?`)
     .join(", ");
   const values = Object.values(updates);
+  if (fields.length === 0) return false; // No fields to update
+
   const [result] = await pool.execute<ResultSetHeader>(
     `UPDATE elections SET ${fields}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
     [...values, id]
@@ -290,12 +308,12 @@ export const getCandidatesByElectionId = async (
 ): Promise<Candidate[]> => {
   const [rows] = await pool.execute<RowDataPacket[]>(
     `
-      SELECT c.*, pm.name AS party_member_name, pm.email AS party_member_email, pm.image_url, p.name AS party_name
-      FROM candidates c
-      JOIN party_members pm ON c.party_member_id = pm.id
-      JOIN parties p ON pm.party_id = p.id
-      WHERE c.election_id = ?
-    `,
+    SELECT c.*, pm.name AS party_member_name, pm.email AS party_member_email, pm.image_url, p.name AS party_name
+    FROM candidates c
+    JOIN party_members pm ON c.party_member_id = pm.id
+    JOIN parties p ON pm.party_id = p.id
+    WHERE c.election_id = ?
+  `,
     [electionId]
   );
   return rows as Candidate[];
@@ -337,6 +355,17 @@ export const getVoteLogByTransactionHash = async (
     [transactionHash]
   );
   return (rows as VoteLog[])[0] || null;
+};
+
+export const getVoteLogsByElectionId = async (
+  electionId: number
+): Promise<VoteLog[]> => {
+  // ADDED FOR FILTERING RESULTS
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    "SELECT * FROM vote_logs WHERE election_id = ?",
+    [electionId]
+  );
+  return rows as VoteLog[];
 };
 
 // --- Voter Receipts Operations (for voters to verify their own vote) ---

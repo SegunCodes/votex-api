@@ -1,106 +1,113 @@
-import { Request, Response } from "express";
-import * as mysqlService from "../services/mysqlService";
-import * as blockchainService from "../services/blockchainService";
-import { Election } from "../types/index.d";
+import { Request, Response } from 'express';
+import * as mysqlService from '../services/mysqlService';
+import * as blockchainService from '../services/blockchainService';
+import { Election, VoteLog } from '../types/index.d'
+import { ethers } from 'ethers'; // For address validation
 
 export const getAvailableElections = async (req: Request, res: Response) => {
   try {
-    // req.user is populated by authenticateVoter middleware
     const voterWalletAddress = req.user?.walletAddress;
 
     if (!voterWalletAddress) {
-      return res
-        .status(400)
-        .json({ error: "Voter wallet address not found in token." });
+      return res.status(400).json({ error: 'Voter wallet address not found in token.' });
     }
 
     const activeElections = await mysqlService.getActiveElections();
 
-    // In a real app, you would also check on-chain eligibility for this voter
-    // for each election. For simplicity, we assume if they are authenticated,
-    // they are eligible for active elections.
-    // const eligibleElections = await Promise.all(activeElections.map(async (election) => {
-    //   const isEligible = await blockchainService.checkVoterEligibilityOnChain(election.blockchain_contract_address!, voterWalletAddress);
-    //   return isEligible ? election : null;
-    // })).then(results => results.filter(e => e !== null));
+    // Filter elections based on voter eligibility on-chain
+    const systemContractAddress = process.env.ELECTION_SYSTEM_CONTRACT_ADDRESS;
+    if (!systemContractAddress) {
+      throw new Error('ELECTION_SYSTEM_CONTRACT_ADDRESS is not set in environment variables.');
+    }
+
+    const eligibleElections = await Promise.all(activeElections.map(async (election) => {
+      // Check if voter is whitelisted for this specific election
+      const isWhitelisted = await blockchainService.isVoterWhitelisted(systemContractAddress, election.id!, voterWalletAddress);
+      return isWhitelisted ? election : null;
+    })).then(results => results.filter(e => e !== null));
+
 
     res.status(200).json({
-      message: "Available elections retrieved.",
-      elections: activeElections, // Or eligibleElections if filtered
+      message: 'Available elections retrieved.',
+      elections: eligibleElections,
     });
   } catch (error) {
-    console.error("Error getting available elections:", error);
-    res
-      .status(500)
-      .json({
-        error: `Failed to retrieve available elections: ${
-          (error as Error).message
-        }`,
-      });
+    console.error('Error getting available elections:', error);
+    res.status(500).json({ error: `Failed to retrieve available elections: ${(error as Error).message}` });
   }
 };
 
 export const castVote = async (req: Request, res: Response) => {
   try {
     const { electionId, postId, candidateId } = req.body;
-    // voterWalletAddress comes from the JWT payload
     const voterWalletAddress = req.user?.walletAddress;
 
     if (!electionId || !postId || !candidateId || !voterWalletAddress) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "Missing election ID, post ID, candidate ID, or voter wallet address.",
-        });
+      return res.status(400).json({ error: 'Missing election ID, post ID, candidate ID, or voter wallet address.' });
     }
 
     const election = await mysqlService.getElectionById(electionId);
-    if (!election || election.status !== "active") {
-      return res
-        .status(400)
-        .json({ error: "Election is not active or does not exist." });
+    if (!election || election.status !== 'active') {
+      return res.status(400).json({ error: 'Election is not active or does not exist.' });
     }
 
     const post = await mysqlService.getPostById(postId);
     if (!post || post.election_id !== electionId) {
-      return res
-        .status(400)
-        .json({ error: "Invalid post ID for this election." });
+      return res.status(400).json({ error: 'Invalid post ID for this election.' });
     }
 
     const candidate = await mysqlService.getCandidateById(candidateId);
     if (!candidate || candidate.post_id !== postId) {
-      return res
-        .status(400)
-        .json({ error: "Invalid candidate ID for this post." });
+      return res.status(400).json({ error: 'Invalid candidate ID for this post.' });
     }
 
-    // --- REAL BLOCKCHAIN LOGIC ---
-    // 1. Verify voter eligibility and if they have already voted on-chain for this post/election
-    // This check is crucial for preventing double-voting.
-    // const hasVotedOnChain = await blockchainService.checkVoterHasVotedForPost(election.blockchain_contract_address!, postId, voterWalletAddress);
-    // if (hasVotedOnChain) {
-    //   return res.status(403).json({ error: 'You have already voted for this post in this election.' });
-    // }
+    const systemContractAddress = process.env.ELECTION_SYSTEM_CONTRACT_ADDRESS;
+    if (!systemContractAddress) {
+      throw new Error('ELECTION_SYSTEM_CONTRACT_ADDRESS is not set in environment variables.');
+    }
 
-    // 2. Instruct frontend to cast vote on smart contract and return transaction hash
-    // The frontend will send the transaction hash back to this endpoint for logging.
-    // For now, we simulate the blockchain call directly from backend for simplicity in this file.
+    // 1. Verify voter eligibility and if they have already voted on-chain for this post/election
+    const isWhitelisted = await blockchainService.isVoterWhitelisted(systemContractAddress, electionId, voterWalletAddress);
+    if (!isWhitelisted) {
+      return res.status(403).json({ error: 'You are not whitelisted to vote in this election.' });
+    }
+
+    const hasVotedForPost = await blockchainService.hasVotedForPost(systemContractAddress, electionId, postId, voterWalletAddress);
+    if (hasVotedForPost) {
+      return res.status(403).json({ error: 'You have already voted for this post in this election.' });
+    }
+
+    // 2. Cast vote on the smart contract (simulated from backend for now)
     const transactionHash = await blockchainService.castVoteOnChain(
-      election.blockchain_contract_address || electionId.toString(),
+      systemContractAddress,
+      electionId,
       postId,
       candidate.blockchain_candidate_id!,
       voterWalletAddress
     );
 
     if (!transactionHash) {
-      return res
-        .status(500)
-        .json({ error: "Failed to record vote on blockchain." });
+      return res.status(500).json({ error: 'Failed to record vote on blockchain.' });
     }
 
-    // Log the vote in MySQL for auditing purposes
+    // 3. Verify the transaction on-chain (crucial for real apps)
+    // This step ensures the transaction actually went through and matches what we expect
+    const isTxValid = await blockchainService.verifyVoteTransaction(
+        transactionHash,
+        systemContractAddress,
+        electionId,
+        postId,
+        candidate.blockchain_candidate_id!,
+        voterWalletAddress
+    );
+
+    if (!isTxValid) {
+        // This is a critical error, means the blockchain record doesn't match
+        console.error(`CRITICAL: Blockchain transaction ${transactionHash} for vote did not verify correctly.`);
+        return res.status(500).json({ error: 'Vote recorded but failed on-chain verification. Please contact support.' });
+    }
+
+    // 4. Log the vote in MySQL for auditing purposes
     await mysqlService.createVoteLog({
       election_id: electionId,
       post_id: postId,
@@ -109,19 +116,18 @@ export const castVote = async (req: Request, res: Response) => {
       transaction_hash: transactionHash,
     });
 
-    // Create a voter receipt for the voter's personal record
+    // 5. Create a voter receipt for the voter's personal record
     await mysqlService.createVoterReceipt({
       voter_wallet_address: voterWalletAddress,
       election_id: electionId,
       post_id: postId,
       candidate_id: candidateId,
       transaction_hash: transactionHash,
-      // blockchain_receipt_id: '...', // If smart contract returns a specific receipt ID
     });
 
+
     res.status(200).json({
-      message:
-        "Vote cast successfully and recorded on the blockchain. Transaction hash logged.",
+      message: 'Vote cast successfully and recorded on the blockchain. Transaction hash logged.',
       electionId,
       postId,
       candidateId,
@@ -129,10 +135,8 @@ export const castVote = async (req: Request, res: Response) => {
       transactionHash,
     });
   } catch (error) {
-    console.error("Error casting vote:", error);
-    res
-      .status(500)
-      .json({ error: `Failed to cast vote: ${(error as Error).message}` });
+    console.error('Error casting vote:', error);
+    res.status(500).json({ error: `Failed to cast vote: ${(error as Error).message}` });
   }
 };
 
@@ -142,96 +146,157 @@ export const getVoterElectionStatus = async (req: Request, res: Response) => {
     const voterWalletAddress = req.user?.walletAddress;
 
     if (!voterWalletAddress) {
-      return res
-        .status(400)
-        .json({ error: "Voter wallet address not found in token." });
+      return res.status(400).json({ error: 'Voter wallet address not found in token.' });
     }
 
     const election = await mysqlService.getElectionById(parseInt(electionId));
     if (!election) {
-      return res.status(404).json({ error: "Election not found." });
+      return res.status(404).json({ error: 'Election not found.' });
+    }
+    if (!election.blockchain_contract_address) {
+      return res.status(400).json({ error: 'Election has no deployed smart contract address.' });
     }
 
-    // --- REAL BLOCKCHAIN LOGIC ---
-    // Query smart contract to check if voter has voted in this election/for specific posts.
+    // Query smart contract to check if voter has voted in this election.
     const hasVoted = await blockchainService.checkVoterHasVotedForElection(
-      election.blockchain_contract_address || electionId,
+      election.blockchain_contract_address,
+      parseInt(electionId),
       voterWalletAddress
     );
+
+    // Also check if whitelisted
+    const isWhitelisted = await blockchainService.isVoterWhitelisted(
+      election.blockchain_contract_address,
+      parseInt(electionId),
+      voterWalletAddress
+    );
+
 
     res.status(200).json({
       message: `Voter status for election ${electionId} retrieved.`,
       electionId: election.id,
       voterWalletAddress,
       hasVoted: hasVoted,
+      isWhitelisted: isWhitelisted,
       electionDetails: election,
     });
   } catch (error) {
-    console.error("Error getting voter election status:", error);
-    res
-      .status(500)
-      .json({
-        error: `Failed to get voter election status: ${
-          (error as Error).message
-        }`,
-      });
+    console.error('Error getting voter election status:', error);
+    res.status(500).json({ error: `Failed to get voter election status: ${(error as Error).message}` });
   }
 };
 
 export const getElectionResults = async (req: Request, res: Response) => {
   try {
     const { electionId } = req.params;
-    const { gender, ageRange } = req.query; // For filtering results
+    const { gender, ageRange } = req.query; // ageRange can be string | string[] | ParsedQs | ParsedQs[]
 
     const election = await mysqlService.getElectionById(parseInt(electionId));
     if (!election) {
-      return res.status(404).json({ error: "Election not found." });
+      return res.status(404).json({ error: 'Election not found.' });
+    }
+    if (!election.blockchain_contract_address) {
+      return res.status(400).json({ error: 'Election has no deployed smart contract address for results.' });
     }
 
-    // If election is active, get real-time counts from blockchain
-    if (election.status === "active") {
-      const liveResults =
-        await blockchainService.getLiveElectionResultsFromChain(
-          election.blockchain_contract_address || electionId.toString()
-        );
+    // Fetch candidates associated with this election from MySQL
+    const candidates = await mysqlService.getCandidatesByElectionId(parseInt(electionId));
+    const blockchainCandidateIds = candidates.map(c => c.blockchain_candidate_id!).filter(Boolean) as string[];
 
-      // If filtering by gender/age, this would involve more complex logic
-      // of getting all votes from blockchain, then cross-referencing voter DIDs with MySQL profiles.
-      // For now, live results are direct from chain, not filtered by off-chain demographics.
+    // If election is active, get real-time counts from blockchain
+    if (election.status === 'active') {
+      const liveResults = await blockchainService.getLiveElectionResultsFromChain(
+        election.blockchain_contract_address,
+        parseInt(electionId),
+        blockchainCandidateIds
+      );
+
+      // Map blockchain IDs back to names for display
+      const displayResults: Record<string, number> = {};
+      for (const candidate of candidates) {
+          if (candidate.blockchain_candidate_id && liveResults[candidate.blockchain_candidate_id]) {
+              const partyMember = await mysqlService.getPartyMemberById(candidate.party_member_id);
+              displayResults[partyMember?.name || candidate.blockchain_candidate_id] = liveResults[candidate.blockchain_candidate_id];
+          }
+      }
+
       return res.status(200).json({
         message: `Real-time results for election ${electionId} retrieved.`,
         election: election,
-        results: liveResults,
+        results: displayResults,
         isFinal: false,
       });
     }
 
     // If election is ended, get final results from MySQL (which were logged from blockchain)
-    if (election.status === "ended") {
+    if (election.status === 'ended') {
       let finalResults = election.results ? JSON.parse(election.results) : {};
 
-      // Implement filtering by gender and age range if requested
+      // Map blockchain IDs back to names for display
+      const displayResults: Record<string, number> = {};
+      for (const candidate of candidates) {
+          if (candidate.blockchain_candidate_id && finalResults[candidate.blockchain_candidate_id]) {
+              const partyMember = await mysqlService.getPartyMemberById(candidate.party_member_id);
+              displayResults[partyMember?.name || candidate.blockchain_candidate_id] = finalResults[candidate.blockchain_candidate_id];
+          }
+      }
+
+      // Filtering by gender and age range (requires joining vote_logs with voters table)
       if (gender || ageRange) {
-        // This is complex: requires fetching all vote_logs, then joining with voters table
-        // and then re-aggregating results based on filters.
-        // For a real app, you might pre-calculate filtered results or use a view.
-        console.warn(
-          "Filtering results by gender/age not fully implemented for final results. This requires complex data aggregation."
-        );
-        // Example: Fetch all relevant vote_logs and voter data, then filter and aggregate.
-        // const allVoteLogs = await mysqlService.getVoteLogsByElectionId(electionId);
-        // const filteredVoteLogs = allVoteLogs.filter(log => {
-        //   const voter = await mysqlService.getVoterByWalletAddress(log.voter_wallet_address);
-        //   // Apply gender/age filters here
-        //   return true;
-        // });
-        // finalResults = aggregateFilteredVotes(filteredVoteLogs);
+        const allVoteLogs = await mysqlService.getVoteLogsByElectionId(parseInt(electionId));
+        let filteredVoteLogs: VoteLog[] = allVoteLogs; // Initialize with the correct type
+
+        // Apply gender filter
+        if (typeof gender === 'string' && gender) { // Ensure gender is a string
+          const votersPromises = filteredVoteLogs.map(log => mysqlService.getVoterByWalletAddress(log.voter_wallet_address));
+          const voters = await Promise.all(votersPromises);
+
+          filteredVoteLogs = filteredVoteLogs.filter((log, index) => {
+            const voter = voters[index];
+            return voter?.gender === gender;
+          });
+        }
+
+        // Apply age range filter
+        if (typeof ageRange === 'string' && ageRange) { // Ensure ageRange is a string
+          const [minAgeStr, maxAgeStr] = ageRange.split('-');
+          const minAge = parseInt(minAgeStr);
+          const maxAge = parseInt(maxAgeStr);
+
+          if (!isNaN(minAge) && !isNaN(maxAge)) {
+            const votersPromises = filteredVoteLogs.map(log => mysqlService.getVoterByWalletAddress(log.voter_wallet_address));
+            const voters = await Promise.all(votersPromises);
+
+            filteredVoteLogs = filteredVoteLogs.filter((log, index) => {
+              const voter = voters[index];
+              return voter && voter.age >= minAge && voter.age <= maxAge;
+            });
+          }
+        }
+
+        // Re-aggregate results based on filtered logs
+        const filteredAggregatedResults: Record<string, number> = {};
+        for (const log of filteredVoteLogs) {
+            const votedCandidate = candidates.find(c => c.id === log.candidate_id);
+            if (votedCandidate && votedCandidate.blockchain_candidate_id) {
+                const partyMember = await mysqlService.getPartyMemberById(votedCandidate.party_member_id);
+                const candidateName = partyMember?.name || votedCandidate.blockchain_candidate_id;
+                filteredAggregatedResults[candidateName] = (filteredAggregatedResults[candidateName] || 0) + 1;
+            }
+        }
+        return res.status(200).json({
+          message: `Final results for election ${electionId} filtered by ${gender || 'All Genders'} and ${ageRange || 'All Ages'}.`,
+          election: election,
+          results: filteredAggregatedResults,
+          isFinal: true,
+          filters: { gender, ageRange }
+        });
       }
 
       return res.status(200).json({
         message: `Final results for election ${electionId} retrieved.`,
         election: election,
-        results: finalResults,
+        results: displayResults,
         isFinal: true,
       });
     }
@@ -243,15 +308,10 @@ export const getElectionResults = async (req: Request, res: Response) => {
       results: {},
       isFinal: false,
     });
+
   } catch (error) {
-    console.error("Error getting election results:", error);
-    res
-      .status(500)
-      .json({
-        error: `Failed to retrieve election results: ${
-          (error as Error).message
-        }`,
-      });
+    console.error('Error getting election results:', error);
+    res.status(500).json({ error: `Failed to retrieve election results: ${(error as Error).message}` });
   }
 };
 
@@ -260,25 +320,43 @@ export const getVoterVoteReceipts = async (req: Request, res: Response) => {
     const voterWalletAddress = req.user?.walletAddress;
 
     if (!voterWalletAddress) {
-      return res
-        .status(400)
-        .json({ error: "Voter wallet address not found in token." });
+      return res.status(400).json({ error: 'Voter wallet address not found in token.' });
     }
 
-    const receipts = await mysqlService.getVoterReceiptsByWalletAddress(
-      voterWalletAddress
-    );
+    const receipts = await mysqlService.getVoterReceiptsByWalletAddress(voterWalletAddress);
+
+    // For each receipt, fetch candidate and election details for better display
+    const detailedReceipts = await Promise.all(receipts.map(async (receipt) => {
+        const election = await mysqlService.getElectionById(receipt.election_id);
+        const post = await mysqlService.getPostById(receipt.post_id);
+        const candidate = await mysqlService.getCandidateById(receipt.candidate_id);
+        let candidateName = 'Unknown Candidate';
+        let electionTitle = 'Unknown Election';
+        let postName = 'Unknown Post';
+
+        if (candidate && candidate.party_member_id) {
+            const partyMember = await mysqlService.getPartyMemberById(candidate.party_member_id);
+            candidateName = partyMember?.name || candidateName;
+        }
+        if (election) electionTitle = election.title;
+        if (post) postName = post.name;
+
+        return {
+            ...receipt,
+            electionTitle,
+            postName,
+            candidateName,
+            // You can add a link to block explorer here if needed
+            blockExplorerUrl: `https://sepolia.etherscan.io/tx/${receipt.transaction_hash}` // Adjust for Hardhat if needed
+        };
+    }));
 
     res.status(200).json({
       message: `Vote receipts for ${voterWalletAddress} retrieved.`,
-      receipts: receipts,
+      receipts: detailedReceipts,
     });
   } catch (error) {
-    console.error("Error getting voter receipts:", error);
-    res
-      .status(500)
-      .json({
-        error: `Failed to retrieve vote receipts: ${(error as Error).message}`,
-      });
+    console.error('Error getting voter receipts:', error);
+    res.status(500).json({ error: `Failed to retrieve vote receipts: ${(error as Error).message}` });
   }
 };
