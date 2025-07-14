@@ -50,6 +50,7 @@ CREATE TABLE voters (
     gender ENUM('Male', 'Female', 'Other'),
     national_id_number VARCHAR(255) UNIQUE, -- If NIN is used for verification
     wallet_address VARCHAR(255) UNIQUE, -- Linked MetaMask wallet (DID)
+    auth_nonce VARCHAR(255),
     is_eligible_on_chain BOOLEAN DEFAULT FALSE, -- Set to TRUE when whitelisted on smart contract
     registration_status ENUM('pending_email_verification', 'email_verified', 'wallet_linked', 'eligible_on_chain') DEFAULT 'pending_email_verification',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -64,7 +65,7 @@ CREATE TABLE elections (
     start_date DATETIME NOT NULL,
     end_date DATETIME NOT NULL,
     status ENUM('pending', 'active', 'ended') DEFAULT 'pending',
-    blockchain_contract_address VARCHAR(255) UNIQUE, -- Address of the deployed smart contract for this election
+    blockchain_contract_address VARCHAR(255), -- Address of the deployed smart contract for this election
     results JSON, -- Store final aggregated results as JSON
     winning_candidate_id INT, -- ID of the winning candidate from the candidates table
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

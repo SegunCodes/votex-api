@@ -4,6 +4,8 @@ import { generateToken, verifyWalletSignature } from '../services/authService';
 import { findUserByEmail, getVoterByEmail, updateVoterAuthNonce, updateVoterStatusAndWallet } from '../services/mysqlService';
 import { Voter, User } from '../types/index.d'; // Import User type
 import { v4 as uuidv4 } from 'uuid'; // For generating unique nonces
+import * as blockchainService from '../services/blockchainService'; 
+import { ethers } from 'ethers';
 
 // Message to be signed by the voter's wallet for authentication
 export const VOTER_AUTH_MESSAGE_PREFIX = "Authenticate to VoteX: ";
@@ -79,7 +81,6 @@ export const requestVoterAuthMessage = async (req: Request, res: Response) => {
   }
 };
 
-
 // Voter Authenticate (Step 2 of Web3 Login)
 export const voterAuthenticate = async (req: Request, res: Response) => {
   const { message, signature, walletAddress, email } = req.body;
@@ -106,14 +107,55 @@ export const voterAuthenticate = async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Signature verification failed. Invalid signature or wallet address.' });
     }
 
-    // If wallet address is not yet linked or different, update it
-    if (!voter.wallet_address || voter.wallet_address.toLowerCase() !== walletAddress.toLowerCase()) {
-      await updateVoterStatusAndWallet(voter.id!, walletAddress.toLowerCase(), 'wallet_linked', null); // Link wallet, clear nonce
-      console.log(`Voter ${voter.email} wallet linked: ${walletAddress}`);
-    } else {
-      await updateVoterAuthNonce(voter.id!, null); // Clear nonce after successful auth
+    // --- AUTOMATED GLOBAL WHITELISTING LOGIC ---
+    const systemContractAddress = process.env.ELECTION_SYSTEM_CONTRACT_ADDRESS;
+    if (!systemContractAddress) {
+      throw new Error('ELECTION_SYSTEM_CONTRACT_ADDRESS is not set in environment variables. Cannot whitelist voter.');
     }
 
+    let whitelistTxHash: string | null = null;
+    // Only attempt to whitelist if not already marked as eligible on-chain (or if wallet address changed)
+    if (!voter.is_eligible_on_chain || (voter.wallet_address && voter.wallet_address.toLowerCase() !== walletAddress.toLowerCase())) {
+      try {
+        // Call the new global whitelist function
+        whitelistTxHash = await blockchainService.globalWhitelistVoterOnChain(
+          systemContractAddress,
+          walletAddress.toLowerCase()
+        );
+        console.log(`Voter ${walletAddress} globally whitelisted on chain. Tx: ${whitelistTxHash}`);
+      } catch (whitelistError: any) { // Catch specific error if already whitelisted
+        if (whitelistError.message && whitelistError.message.includes('AlreadyGloballyWhitelisted')) {
+            console.log(`Voter ${walletAddress} was already globally whitelisted. Skipping transaction.`);
+            // No need to set whitelistTxHash if it was already whitelisted
+        } else {
+            console.error('Error during automated whitelisting:', whitelistError);
+            // Do not block login if whitelisting fails, but log it.
+        }
+      }
+    }
+
+    // Update voter profile in MySQL
+    let newRegistrationStatus: Voter['registration_status'] = 'wallet_linked';
+    let isEligibleOnChain = voter.is_eligible_on_chain || false; // Keep existing status if true
+
+    if (whitelistTxHash) { // If a new whitelist transaction was sent
+        newRegistrationStatus = 'eligible_on_chain';
+        isEligibleOnChain = true;
+    } else if (voter.is_eligible_on_chain) { // If already whitelisted from previous login
+        newRegistrationStatus = 'eligible_on_chain';
+        isEligibleOnChain = true;
+    }
+
+    await updateVoterStatusAndWallet(
+      voter.id!,
+      walletAddress.toLowerCase(),
+      newRegistrationStatus,
+      null, // Clear nonce after use
+      isEligibleOnChain // Update is_eligible_on_chain flag
+    );
+
+
+    // Generate a JWT for the voter
     const payload = {
       id: voter.id!,
       email: voter.email,
@@ -124,7 +166,7 @@ export const voterAuthenticate = async (req: Request, res: Response) => {
     const token = generateToken(payload, '12h');
 
     res.status(200).json({
-      message: 'Voter authentication successful!',
+      message: 'Voter authentication successful! Wallet linked and whitelisted on chain.',
       token,
       user: {
         id: voter.id,
@@ -133,6 +175,7 @@ export const voterAuthenticate = async (req: Request, res: Response) => {
         name: voter.name,
         role: 'voter',
       },
+      whitelistTxHash: whitelistTxHash // Return tx hash for debugging
     });
   } catch (error) {
     console.error('Error during voter authentication:', error);

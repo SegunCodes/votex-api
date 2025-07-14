@@ -160,28 +160,48 @@ export const registerCandidateOnChain = async (
 };
 
 /**
- * Admin: Whitelists a voter's wallet address for a specific election on the blockchain.
+ * Admin: Globally whitelists a voter's wallet address on the blockchain.
+ * This makes them eligible for all current and future elections.
  * @param {string} systemContractAddress - The address of the main VoteXElection system contract.
- * @param {number} electionId - The ID of the election.
  * @param {string} voterAddress - The wallet address to whitelist.
  * @returns {Promise<string>} Transaction hash.
  */
-export const whitelistVoterOnChain = async (
-    systemContractAddress: string,
-    electionId: number,
-    voterAddress: string
+export const globalWhitelistVoterOnChain = async ( // RENAMED FROM whitelistVoterOnChain
+  systemContractAddress: string,
+  voterAddress: string
 ): Promise<string> => {
-    if (!adminWallet) throw new Error("Admin wallet not configured. Cannot whitelist voter.");
-    const contract = getElectionContractInstance(systemContractAddress);
-    try {
-        const tx = await contract.whitelistVoter(electionId, voterAddress);
-        await tx.wait();
-        console.log(`Voter ${voterAddress} whitelisted for election ${electionId}. Tx hash: ${tx.hash}`);
-        return tx.hash;
-    } catch (error) {
-        console.error(`Error whitelisting voter ${voterAddress} for election ${electionId}:`, (error as Error).message);
-        throw new Error(`Failed to whitelist voter on chain: ${(error as Error).message}`);
-    }
+  if (!adminWallet) throw new Error("Admin wallet not configured. Cannot whitelist voter globally.");
+  const contract = getElectionContractInstance(systemContractAddress);
+  try {
+      const tx = await contract.globalWhitelistVoter(voterAddress); // Call the new global function
+      await tx.wait();
+      console.log(`Voter ${voterAddress} globally whitelisted. Tx hash: ${tx.hash}`);
+      return tx.hash;
+  } catch (error) {
+      console.error(`Error globally whitelisting voter ${voterAddress}:`, (error as Error).message);
+      throw new Error(`Failed to globally whitelist voter on chain: ${(error as Error).message}`);
+  }
+};
+
+/**
+ * Checks if a voter is globally whitelisted.
+ * @param {string} systemContractAddress - The address of the main VoteXElection system contract.
+ * @param {string} voterAddress - The address to check.
+ * @returns {Promise<boolean>} True if globally whitelisted, false otherwise.
+ */
+export const isVoterGloballyWhitelisted = async (
+  systemContractAddress: string,
+  voterAddress: string
+): Promise<boolean> => {
+  console.log(`[Blockchain] Checking if voter ${voterAddress} is globally whitelisted...`);
+  const contract = getElectionContractInstance(systemContractAddress);
+  try {
+      const whitelisted = await contract.isVoterGloballyWhitelisted(voterAddress);
+      return whitelisted;
+  } catch (error) {
+      console.error(`Error checking global whitelisted status for voter ${voterAddress}:`, (error as Error).message);
+      return false; // Assume not whitelisted on error
+  }
 };
 
 /**
@@ -354,29 +374,6 @@ export const verifyVoteTransaction = async (
         console.error(`Error verifying vote transaction ${transactionHash}:`, (error as Error).message);
         return false;
     }
-};
-
-/**
- * Checks if a voter is whitelisted for a specific election.
- * @param {string} systemContractAddress - The address of the main VoteXElection system contract.
- * @param {number} electionId - The ID of the election.
- * @param {string} voterAddress - The address to check.
- * @returns {Promise<boolean>} True if whitelisted, false otherwise.
- */
-export const isVoterWhitelisted = async (
-  systemContractAddress: string,
-  electionId: number,
-  voterAddress: string
-): Promise<boolean> => {
-  console.log(`[Blockchain] Checking if voter ${voterAddress} is whitelisted for election ${electionId}...`);
-  const contract = getElectionContractInstance(systemContractAddress);
-  try {
-      const whitelisted = await contract.isVoterWhitelisted(electionId, voterAddress);
-      return whitelisted;
-  } catch (error) {
-      console.error(`Error checking whitelisted status for voter ${voterAddress} in election ${electionId}:`, (error as Error).message);
-      return false; // Assume not whitelisted on error
-  }
 };
 
 /**

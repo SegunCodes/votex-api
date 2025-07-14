@@ -36,9 +36,9 @@ async function seedDatabase() {
     // Seed Parties
     const [partyResult] = await connection.execute(
       `INSERT INTO parties (name, logo_url, description) VALUES
-       ('Progressive Party', 'https://example.com/logo_pp.png', 'Focused on national development.'),
-       ('Unity Alliance', 'https://example.com/logo_ua.png', 'Bringing people together.'),
-       ('Democratic Front', 'https://example.com/logo_df.png', 'Advocating for citizen rights.')
+       ('Progressive Party', 'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSlpkk89Lx9rMIfFxKr2AwjYp0wtpCFguJoXw&s', 'Focused on national development.'),
+       ('Unity Alliance', 'https://upload.wikimedia.org/wikipedia/en/thumb/6/62/Logo_of_the_Peoples_Democratic_Party_%28Nigeria%29.png/300px-Logo_of_the_Peoples_Democratic_Party_%28Nigeria%29.png', 'Bringing people together.'),
+       ('Democratic Front', 'https://inecnigeria.org/wp-content/uploads/2018/10/LP.jpg', 'Advocating for citizen rights.')
        ON DUPLICATE KEY UPDATE name = VALUES(name);`
     );
     console.log('Parties seeded.');

@@ -147,15 +147,10 @@ export const updateVoter = async (
   return result.affectedRows > 0;
 };
 
-export const updateVoterStatusAndWallet = async (
-  voterId: number,
-  walletAddress: string,
-  status: Voter["registration_status"],
-  authNonce: string | null = null
-): Promise<boolean> => {
+export const updateVoterStatusAndWallet = async (voterId: number, walletAddress: string, status: Voter['registration_status'], authNonce: string | null = null, isEligibleOnChain: boolean = false): Promise<boolean> => {
   const [result] = await pool.execute<ResultSetHeader>(
-    "UPDATE voters SET wallet_address = ?, registration_status = ?, auth_nonce = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-    [walletAddress.toLowerCase(), status, authNonce, voterId]
+    'UPDATE voters SET wallet_address = ?, registration_status = ?, auth_nonce = ?, is_eligible_on_chain = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', // ADDED is_eligible_on_chain
+    [walletAddress.toLowerCase(), status, authNonce, isEligibleOnChain, voterId] // ADDED isEligibleOnChain
   );
   return result.affectedRows > 0;
 };
@@ -173,26 +168,10 @@ export const updateVoterAuthNonce = async (
 };
 
 // --- Election Operations ---
-export const createElection = async (
-  election: Omit<
-    Election,
-    | "id"
-    | "created_at"
-    | "updated_at"
-    | "status"
-    | "results"
-    | "winning_candidate_id"
-  >
-): Promise<number> => {
+export const createElection = async (election: Omit<Election, 'id' | 'created_at' | 'updated_at' | 'status' | 'results' | 'winning_candidate_id'>): Promise<number> => {
   const [result] = await pool.execute<ResultSetHeader>(
-    "INSERT INTO elections (title, description, start_date, end_date, status) VALUES (?, ?, ?, ?, ?)",
-    [
-      election.title,
-      election.description,
-      election.start_date,
-      election.end_date,
-      "pending",
-    ]
+    'INSERT INTO elections (title, description, start_date, end_date, status, blockchain_contract_address) VALUES (?, ?, ?, ?, ?, ?)',
+    [election.title, election.description, election.start_date, election.end_date, 'pending', election.blockchain_contract_address || null]
   );
   return result.insertId;
 };

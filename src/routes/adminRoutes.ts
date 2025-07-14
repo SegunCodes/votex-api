@@ -38,6 +38,7 @@ router.use(authenticateAdmin);
 // Election Management
 router.post("/elections", adminController.createElection);
 router.get("/elections", adminController.getAllElections);
+router.get("/elections/:electionId", adminController.getElectionDetails);
 router.put(
   "/elections/:electionId/status",
   adminController.updateElectionStatus
@@ -45,7 +46,7 @@ router.put(
 router.post("/elections/:electionId/start", adminController.startElection);
 router.post("/elections/:electionId/end", adminController.endElection);
 router.get("/elections/:electionId/audit", adminController.auditElection);
-router.post('/elections/:electionId/whitelist-voter', adminController.whitelistVoter);
+router.get("/elections/:electionId/whitelisted-voters", adminController.getWhitelistedVoters);
 
 // Post Management within an Election
 router.post("/elections/:electionId/posts", adminController.createPost);
@@ -62,5 +63,7 @@ router.get("/voters", adminController.getAllVoters);
 // Party and Party Member Management
 router.get("/parties", adminController.getAllParties);
 router.get("/parties/:partyId/members", adminController.getPartyMembers);
+router.post("/party-members", adminController.createPartyMember);
+router.get("/party-members", adminController.getAllPartyMembers); 
 
 export default router;

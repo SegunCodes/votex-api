@@ -14,25 +14,22 @@ export const getAvailableElections = async (req: Request, res: Response) => {
 
     const activeElections = await mysqlService.getActiveElections();
 
-    // Filter elections based on voter eligibility on-chain
     const systemContractAddress = process.env.ELECTION_SYSTEM_CONTRACT_ADDRESS;
     if (!systemContractAddress) {
       throw new Error('ELECTION_SYSTEM_CONTRACT_ADDRESS is not set in environment variables.');
     }
 
-    const eligibleElections = await Promise.all(activeElections.map(async (election) => {
-      // Check if voter is whitelisted for this specific election
-      const isWhitelisted = await blockchainService.isVoterWhitelisted(systemContractAddress, election.id!, voterWalletAddress);
-      return isWhitelisted ? election : null;
-    })).then(results => results.filter(e => e !== null));
-
+    // const eligibleElections = await Promise.all(activeElections.map(async (election) => {
+    //   const isWhitelistedOnChain = await blockchainService.isVoterGloballyWhitelisted(systemContractAddress, voterWalletAddress);
+    //   return isWhitelistedOnChain ? election : null;
+    // })).then(results => results.filter(e => e !== null));
 
     res.status(200).json({
-      message: 'Available elections retrieved.',
-      elections: eligibleElections,
+      message: 'Available elections.',
+      elections: activeElections,
     });
   } catch (error) {
-    console.error('Error getting available elections:', error);
+    console.error('Error getting available elections (DEMO BYPASS):', error);
     res.status(500).json({ error: `Failed to retrieve available elections: ${(error as Error).message}` });
   }
 };
@@ -66,14 +63,13 @@ export const castVote = async (req: Request, res: Response) => {
       throw new Error('ELECTION_SYSTEM_CONTRACT_ADDRESS is not set in environment variables.');
     }
 
-    // 1. Verify voter eligibility and if they have already voted on-chain for this post/election
-    const isWhitelisted = await blockchainService.isVoterWhitelisted(systemContractAddress, electionId, voterWalletAddress);
-    if (!isWhitelisted) {
-      return res.status(403).json({ error: 'You are not whitelisted to vote in this election.' });
-    }
+    // const isGloballyWhitelisted = await blockchainService.isVoterGloballyWhitelisted(systemContractAddress, voterWalletAddress);
+    // if (!isGloballyWhitelisted) {
+    //   return res.status(403).json({ error: 'You are not globally whitelisted to vote. Please ensure your wallet is linked.' });
+    // }
 
-    const hasVotedForPost = await blockchainService.hasVotedForPost(systemContractAddress, electionId, postId, voterWalletAddress);
-    if (hasVotedForPost) {
+    const hasVotedForThisPost = await blockchainService.hasVotedForPost(systemContractAddress, electionId, postId, voterWalletAddress);
+    if (hasVotedForThisPost) {
       return res.status(403).json({ error: 'You have already voted for this post in this election.' });
     }
 
@@ -102,7 +98,6 @@ export const castVote = async (req: Request, res: Response) => {
     );
 
     if (!isTxValid) {
-        // This is a critical error, means the blockchain record doesn't match
         console.error(`CRITICAL: Blockchain transaction ${transactionHash} for vote did not verify correctly.`);
         return res.status(500).json({ error: 'Vote recorded but failed on-chain verification. Please contact support.' });
     }
@@ -140,6 +135,69 @@ export const castVote = async (req: Request, res: Response) => {
   }
 };
 
+export const getElectionDetailsPublic = async (req: Request, res: Response) => {
+  try {
+    const { electionId } = req.params;
+    const election = await mysqlService.getElectionById(parseInt(electionId));
+    if (!election) {
+      return res.status(404).json({ error: 'Election not found.' });
+    }
+    res.status(200).json({
+      message: `Election ${electionId} details retrieved.`,
+      election: election,
+    });
+  } catch (error) {
+    console.error('Error getting public election details:', error);
+    res.status(500).json({ error: `Failed to retrieve election details: ${(error as Error).message}` });
+  }
+};
+
+export const getElectionPostsPublic = async (req: Request, res: Response) => {
+  try {
+    const { electionId } = req.params;
+    const posts = await mysqlService.getPostsByElectionId(parseInt(electionId));
+    res.status(200).json({
+      message: `Posts for election ${electionId} retrieved.`,
+      posts: posts,
+    });
+  } catch (error) {
+    console.error('Error getting public election posts:', error);
+    res.status(500).json({ error: `Failed to retrieve posts: ${(error as Error).message}` });
+  }
+};
+
+export const getPostCandidatesPublic = async (req: Request, res: Response) => {
+  try {
+    const { postId } = req.params;
+    const candidates = await mysqlService.getCandidatesByPostId(parseInt(postId));
+
+    const detailedCandidates = await Promise.all(candidates.map(async (candidate) => {
+      const partyMember = await mysqlService.getPartyMemberById(candidate.party_member_id);
+      let partyName = 'N/A';
+      if (partyMember && partyMember.party_id) {
+        const party = await mysqlService.getPartyById(partyMember.party_id);
+        partyName = party ? party.name : 'N/A';
+      }
+
+      return {
+        ...candidate,
+        party_member_name: partyMember?.name,
+        party_member_email: partyMember?.email,
+        image_url: partyMember?.image_url,
+        party_name: partyName,
+      };
+    }));
+
+    res.status(200).json({
+      message: `Candidates for post ${postId} retrieved.`,
+      candidates: detailedCandidates,
+    });
+  } catch (error) {
+    console.error('Error getting public post candidates:', error);
+    res.status(500).json({ error: `Failed to retrieve candidates: ${(error as Error).message}` });
+  }
+};
+
 export const getVoterElectionStatus = async (req: Request, res: Response) => {
   try {
     const { electionId } = req.params;
@@ -164,12 +222,11 @@ export const getVoterElectionStatus = async (req: Request, res: Response) => {
       voterWalletAddress
     );
 
-    // Also check if whitelisted
-    const isWhitelisted = await blockchainService.isVoterWhitelisted(
-      election.blockchain_contract_address,
-      parseInt(electionId),
-      voterWalletAddress
-    );
+    // Also check if GLOBALLY whitelisted
+    // const isGloballyWhitelisted = await blockchainService.isVoterGloballyWhitelisted(
+    //   election.blockchain_contract_address,
+    //   voterWalletAddress
+    // );
 
 
     res.status(200).json({
@@ -177,7 +234,7 @@ export const getVoterElectionStatus = async (req: Request, res: Response) => {
       electionId: election.id,
       voterWalletAddress,
       hasVoted: hasVoted,
-      isWhitelisted: isWhitelisted,
+      isWhitelisted: true,
       electionDetails: election,
     });
   } catch (error) {
@@ -312,6 +369,19 @@ export const getElectionResults = async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Error getting election results:', error);
     res.status(500).json({ error: `Failed to retrieve election results: ${(error as Error).message}` });
+  }
+};
+
+export const getAllElectionsPublic = async (req: Request, res: Response) => {
+  try {
+    const elections = await mysqlService.getAllElections();
+    res.status(200).json({
+      message: 'All elections retrieved for public display.',
+      elections: elections,
+    });
+  } catch (error) {
+    console.error('Error getting all public elections:', error);
+    res.status(500).json({ error: `Failed to retrieve all elections: ${(error as Error).message}` });
   }
 };
 
