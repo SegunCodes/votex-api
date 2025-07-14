@@ -167,6 +167,18 @@ export const updateVoterAuthNonce = async (
   return result.affectedRows > 0;
 };
 
+export const hasVoterVotedForPostInDB = async (
+  electionId: number,
+  postId: number,
+  voterWalletAddress: string
+): Promise<boolean> => {
+  const [rows] = await pool.execute<RowDataPacket[]>(
+    'SELECT COUNT(*) as count FROM vote_logs WHERE election_id = ? AND post_id = ? AND voter_wallet_address = ?',
+    [electionId, postId, voterWalletAddress.toLowerCase()]
+  );
+  return (rows as RowDataPacket[])[0].count > 0;
+};
+
 // --- Election Operations ---
 export const createElection = async (election: Omit<Election, 'id' | 'created_at' | 'updated_at' | 'status' | 'results' | 'winning_candidate_id'>): Promise<number> => {
   const [result] = await pool.execute<ResultSetHeader>(

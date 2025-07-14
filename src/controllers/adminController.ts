@@ -461,7 +461,7 @@ export const getWhitelistedVoters = async (req: Request, res: Response) => {
     if (!election) {
       return res.status(404).json({ error: 'Election not found.' });
     }
-    
+
     if (!election.blockchain_contract_address) {
       return res.status(400).json({ error: 'Election has no deployed smart contract address.' });
     }
@@ -472,7 +472,7 @@ export const getWhitelistedVoters = async (req: Request, res: Response) => {
     // voter is whitelisted if they have a wallet address linked in MySQL
     for (const voter of allRegisteredVoters) {
         if (voter.wallet_address) { // Only consider if wallet is linked
-            // const isWhitelistedOnChain = await blockchainService.isVoterGloballyWhitelisted( // COMMENTED OUT FOR BYPASS
+            // const isWhitelistedOnChain = await blockchainService.isVoterGloballyWhitelisted(
             //     election.blockchain_contract_address,
             //     voter.wallet_address
             // );
@@ -490,11 +490,11 @@ export const getWhitelistedVoters = async (req: Request, res: Response) => {
     }
 
     res.status(200).json({
-      message: `Whitelisted voters for election ${electionId} retrieved (DEMO BYPASS).`,
+      message: `Whitelisted voters for election ${electionId} retrieved.`,
       whitelistedVoters: whitelistedVotersList,
     });
   } catch (error) {
-    console.error('Error getting whitelisted voters (DEMO BYPASS):', error);
+    console.error('Error getting whitelisted voters:', error);
     res.status(500).json({ error: `Failed to retrieve whitelisted voters: ${(error as Error).message}` });
   }
 };

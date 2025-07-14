@@ -29,7 +29,7 @@ export const getAvailableElections = async (req: Request, res: Response) => {
       elections: activeElections,
     });
   } catch (error) {
-    console.error('Error getting available elections (DEMO BYPASS):', error);
+    console.error('Error getting available elections:', error);
     res.status(500).json({ error: `Failed to retrieve available elections: ${(error as Error).message}` });
   }
 };
@@ -68,12 +68,13 @@ export const castVote = async (req: Request, res: Response) => {
     //   return res.status(403).json({ error: 'You are not globally whitelisted to vote. Please ensure your wallet is linked.' });
     // }
 
-    const hasVotedForThisPost = await blockchainService.hasVotedForPost(systemContractAddress, electionId, postId, voterWalletAddress);
+    // Check double voting against MySQL vote_logs table
+    const hasVotedForThisPost = await mysqlService.hasVoterVotedForPostInDB(electionId, postId, voterWalletAddress);
     if (hasVotedForThisPost) {
-      return res.status(403).json({ error: 'You have already voted for this post in this election.' });
+      return res.status(403).json({ error: 'You have already voted for this post in this election' });
     }
 
-    // 2. Cast vote on the smart contract (simulated from backend for now)
+    // Cast vote on the smart contract
     const transactionHash = await blockchainService.castVoteOnChain(
       systemContractAddress,
       electionId,
